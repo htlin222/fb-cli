@@ -1,0 +1,188 @@
+.DEFAULT_GOAL := help
+SHELL := /bin/bash
+
+# Prefer uv (pulls deps from PEP-723 header on first run); fall back to python3.
+RUN := $(shell command -v uv >/dev/null 2>&1 && echo "uv run" || echo "python3")
+
+.PHONY: help \
+  post post-image post-video post-carousel post-link schedule \
+  edit delete \
+  list get comments conversation reactions \
+  reply delete-comment hide unhide \
+  insights page-insights \
+  pages whoami refresh auth limits \
+  smoke worker-deploy worker-tail worker-delete env-check test
+
+help: ## show this help
+	@echo "fb-cli -- Facebook Pages CLI ('make <target>' wraps 'uv run fb.py <subcmd>')"
+	@echo ""
+	@echo "Publish:"
+	@echo "  make post MSG=\"...\"                           text post"
+	@echo "  make post-image URL=<img> [MSG=...]            image post"
+	@echo "  make post-video URL=<video> [MSG=...]          video post"
+	@echo "  make post-carousel URLS=\"u1,u2,...\" [MSG=...]  2-10 photo carousel"
+	@echo "  make post-link URL=<url> MSG=\"...\"             link post with OG preview"
+	@echo "  make schedule MSG=\"...\" WHEN=\"+2h\"             scheduled post (10min-6mo)"
+	@echo ""
+	@echo "Edit / delete:"
+	@echo "  make edit ID=<post-id> MSG=\"...\"               edit post text (media immutable)"
+	@echo "  make delete ID=<post-id>                       delete a post"
+	@echo ""
+	@echo "Read:"
+	@echo "  make list [LIMIT=10]                          recent posts"
+	@echo "  make get ID=<post-id>                         full post details"
+	@echo "  make comments ID=<post-id>                    comments on a post"
+	@echo "  make conversation ID=<comment-id>             nested replies under a comment"
+	@echo "  make reactions ID=<post-id>                   per-type reaction breakdown"
+	@echo ""
+	@echo "Manage comments:"
+	@echo "  make reply TO=<comment-id> MSG=\"...\"           reply to a comment"
+	@echo "  make delete-comment ID=<comment-id>            delete a comment"
+	@echo "  make hide ID=<comment-id>                      hide a comment"
+	@echo "  make unhide ID=<comment-id>                    unhide a comment"
+	@echo ""
+	@echo "Insights:"
+	@echo "  make insights ID=<post-id> [METRIC=...]"
+	@echo "  make page-insights"
+	@echo "  make limits                                    rate-limit headers"
+	@echo ""
+	@echo "Auth / token:"
+	@echo "  make auth                                      OAuth -> long-lived user + page token"
+	@echo "  make refresh                                   refresh long-lived user token"
+	@echo "  make whoami                                    /me + page id + token expiry"
+	@echo "  make pages                                     list pages I admin"
+	@echo "  make env-check                                 sanity-check .env"
+	@echo ""
+	@echo "Worker:"
+	@echo "  make worker-deploy                             redeploy fb-cb worker"
+	@echo "  make worker-tail                               tail worker logs"
+	@echo ""
+	@echo "Demo:"
+	@echo "  make smoke                                     full smoke test (write+delete)"
+	@echo "  make test                                      pytest suite (offline)"
+
+# ---- Publish ----------------------------------------------------------------
+
+post: ## text post; usage: make post MSG="hello"
+	@test -n "$(MSG)" || (echo "usage: make post MSG=\"hello\""; exit 2)
+	$(RUN) fb.py post "$(MSG)" $(if $(LINK),--link "$(LINK)",)
+
+post-image: ## image post; usage: make post-image URL=<img> [MSG=...]
+	@test -n "$(URL)" || (echo "usage: make post-image URL=<image-url> [MSG=...]"; exit 2)
+	$(RUN) fb.py post "$(MSG)" --image-url "$(URL)"
+
+post-video: ## video post; usage: make post-video URL=<video> [MSG=...]
+	@test -n "$(URL)" || (echo "usage: make post-video URL=<video-url> [MSG=...]"; exit 2)
+	$(RUN) fb.py post "$(MSG)" --video-url "$(URL)"
+
+post-carousel: ## carousel post; usage: make post-carousel URLS="u1,u2" [MSG=...]
+	@test -n "$(URLS)" || (echo "usage: make post-carousel URLS=\"u1,u2,...\" [MSG=...]"; exit 2)
+	$(RUN) fb.py post "$(MSG)" --carousel-urls "$(URLS)"
+
+post-link: ## link post with OG preview; usage: make post-link URL=<url> MSG="..."
+	@test -n "$(URL)" -a -n "$(MSG)" || (echo "usage: make post-link URL=<url> MSG=\"...\""; exit 2)
+	$(RUN) fb.py post-link "$(URL)" "$(MSG)"
+
+schedule: ## scheduled post; usage: make schedule MSG="..." WHEN="+2h"
+	@test -n "$(MSG)" -a -n "$(WHEN)" || (echo "usage: make schedule MSG=\"...\" WHEN=\"+2h | YYYY-MM-DD HH:MM\""; exit 2)
+	$(RUN) fb.py schedule "$(MSG)" --when "$(WHEN)"
+
+# ---- Edit / Delete ---------------------------------------------------------
+
+edit: ## edit a post's text; usage: make edit ID=<post-id> MSG="..."
+	@test -n "$(ID)" -a -n "$(MSG)" || (echo "usage: make edit ID=<post-id> MSG=\"...\""; exit 2)
+	$(RUN) fb.py edit "$(ID)" "$(MSG)"
+
+delete: ## delete a post
+	@test -n "$(ID)" || (echo "usage: make delete ID=<post-id>"; exit 2)
+	$(RUN) fb.py delete "$(ID)"
+
+# ---- Read ------------------------------------------------------------------
+
+list: ## list recent posts
+	$(RUN) fb.py list $(if $(LIMIT),$(LIMIT),10)
+
+get: ## full post details; usage: make get ID=<post-id>
+	@test -n "$(ID)" || (echo "usage: make get ID=<post-id>"; exit 2)
+	$(RUN) fb.py get "$(ID)"
+
+comments: ## comments on a post; usage: make comments ID=<post-id>
+	@test -n "$(ID)" || (echo "usage: make comments ID=<post-id>"; exit 2)
+	$(RUN) fb.py comments "$(ID)"
+
+conversation: ## nested replies under a comment
+	@test -n "$(ID)" || (echo "usage: make conversation ID=<comment-id>"; exit 2)
+	$(RUN) fb.py conversation "$(ID)"
+
+reactions: ## per-type reaction breakdown
+	@test -n "$(ID)" || (echo "usage: make reactions ID=<post-id>"; exit 2)
+	$(RUN) fb.py reactions "$(ID)"
+
+# ---- Manage comments -------------------------------------------------------
+
+reply: ## reply to a comment; usage: make reply TO=<comment-id> MSG="..."
+	@test -n "$(TO)" -a -n "$(MSG)" || (echo "usage: make reply TO=<comment-id> MSG=\"...\""; exit 2)
+	$(RUN) fb.py reply "$(TO)" "$(MSG)"
+
+delete-comment: ## delete a comment
+	@test -n "$(ID)" || (echo "usage: make delete-comment ID=<comment-id>"; exit 2)
+	$(RUN) fb.py delete-comment "$(ID)"
+
+hide: ## hide a comment
+	@test -n "$(ID)" || (echo "usage: make hide ID=<comment-id>"; exit 2)
+	$(RUN) fb.py hide "$(ID)"
+
+unhide: ## unhide a comment
+	@test -n "$(ID)" || (echo "usage: make unhide ID=<comment-id>"; exit 2)
+	$(RUN) fb.py unhide "$(ID)"
+
+# ---- Insights --------------------------------------------------------------
+
+insights: ## post-level insights
+	@test -n "$(ID)" || (echo "usage: make insights ID=<post-id> [METRIC=...]"; exit 2)
+	$(RUN) fb.py insights "$(ID)" $(if $(METRIC),--metric "$(METRIC)",)
+
+page-insights: ## page-level insights
+	$(RUN) fb.py page-insights
+
+limits: ## current rate-limit header readout
+	$(RUN) fb.py limits
+
+# ---- Auth / token ----------------------------------------------------------
+
+auth: ## OAuth -> long-lived user + page token
+	$(RUN) fb.py auth
+
+refresh: ## refresh long-lived user token
+	$(RUN) fb.py refresh
+
+whoami: ## /me + page id + token expiry
+	$(RUN) fb.py whoami
+
+pages: ## list pages I admin
+	$(RUN) fb.py pages
+
+# ---- Demo / worker / env ---------------------------------------------------
+
+smoke: ## smoke test (write + delete)
+	$(RUN) fb.py smoke
+
+test: ## run the pytest suite for fb_lib (no network)
+	uv run --with pytest --with responses --with requests pytest tests/ -q
+
+worker-deploy:
+	cd cloudflare-worker && wrangler deploy
+
+worker-tail:
+	cd cloudflare-worker && wrangler tail
+
+worker-delete:
+	cd cloudflare-worker && wrangler delete
+
+env-check: ## verify required keys are present in .env
+	@test -f .env || (echo ".env missing -- copy .env.example and fill credentials"; exit 1)
+	@for k in FB_APP_ID FB_APP_SECRET FB_REDIRECT_URI FB_WORKER_BASE; do \
+		grep -q "^$$k=" .env || (echo "missing in .env: $$k"; exit 1); \
+	done
+	@echo ".env looks ok"
+	@grep -q "^FB_PAGE_ACCESS_TOKEN=" .env && echo "(has page token)" || echo "(no page token -- run 'make auth')"

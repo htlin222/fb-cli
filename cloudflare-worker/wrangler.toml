@@ -1,0 +1,11 @@
+name = "fb-cb"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# First-time setup:
+#   wrangler kv namespace create FB_AUTH
+# then paste the returned id here and uncomment the binding below.
+
+[[kv_namespaces]]
+binding = "THREADS_AUTH"   # binding name kept as-is so the verbatim worker source compiles
+id = "REPLACE_ME_WITH_KV_NAMESPACE_ID"
