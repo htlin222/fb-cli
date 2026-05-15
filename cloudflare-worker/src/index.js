@@ -1,4 +1,4 @@
-// Threads OAuth callback relay.
+// Facebook OAuth callback relay.
 //
 // GET /callback?code=...&state=...  ->  stashes the code in KV keyed by state.
 // GET /poll?state=...                ->  returns the code (204 if not yet present),
@@ -10,9 +10,9 @@
 
 const HTML_OK = `<!doctype html>
 <meta charset=utf-8>
-<title>Threads OAuth callback</title>
+<title>Facebook OAuth callback</title>
 <style>body{font:16px system-ui;margin:4rem auto;max-width:32rem;padding:0 1rem}</style>
-<h2>Threads OAuth code captured.</h2>
+<h2>Facebook OAuth code captured.</h2>
 <p>You can close this tab &mdash; the script will pick it up automatically.</p>`;
 
 export default {

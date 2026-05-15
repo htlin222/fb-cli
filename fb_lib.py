@@ -230,12 +230,94 @@ def poll_worker_for_code(
     )
 
 
-# --- The following OAuth helpers are STUBS for phase 2. ---
-#     exchange_code_for_short_token(cfg, code) -> dict
-#     exchange_to_long_lived(cfg, short_token) -> dict
-#     refresh_long_lived(cfg, user_token) -> dict
-#     fetch_page_token(user_token, page_id) -> dict  (calls /me/accounts and picks page)
-#     persist_token(cfg, ...)
+def exchange_code_for_short_token(cfg: Config, code: str) -> dict:
+    """Exchange the OAuth ?code= for a short-lived (1h) user access token.
+
+    Facebook's endpoint is GET (not POST like Threads).
+    """
+    app_id, app_secret, redirect_uri = cfg.require(
+        "FB_APP_ID", "FB_APP_SECRET", "FB_REDIRECT_URI"
+    )
+    r = requests.get(
+        f"{GRAPH}/oauth/access_token",
+        params={
+            "client_id": app_id,
+            "client_secret": app_secret,
+            "redirect_uri": redirect_uri,
+            "code": code,
+        },
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise _parse_error(r)
+    return r.json()
+
+
+def exchange_to_long_lived(cfg: Config, short_token: str) -> dict:
+    """Exchange short-lived (or expiring long-lived) token for a 60-day token.
+
+    Same endpoint is used to *refresh* an existing long-lived token --
+    just call it again with the current token as ``fb_exchange_token``.
+    """
+    app_id, app_secret = cfg.require("FB_APP_ID", "FB_APP_SECRET")
+    r = requests.get(
+        f"{GRAPH}/oauth/access_token",
+        params={
+            "grant_type": "fb_exchange_token",
+            "client_id": app_id,
+            "client_secret": app_secret,
+            "fb_exchange_token": short_token,
+        },
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise _parse_error(r)
+    return r.json()
+
+
+# Refresh is identical to long-lived exchange; alias for readability.
+refresh_long_lived = exchange_to_long_lived
+
+
+def fetch_pages(user_token: str) -> list[dict]:
+    """GET /me/accounts -> list of pages where the user is admin.
+
+    Each item carries an ``access_token`` field which is the *permanent*
+    per-page token used for day-to-day calls.
+    """
+    out = gget("/me/accounts", user_token)
+    return out.get("data", [])
+
+
+def persist_user_token(cfg: Config, token: str, expires_in: int | None) -> None:
+    updates = {"FB_USER_ACCESS_TOKEN": token}
+    if expires_in is not None:
+        updates["FB_USER_TOKEN_EXPIRES_AT"] = str(int(time.time()) + int(expires_in))
+    cfg.save(updates)
+
+
+def persist_page(cfg: Config, page: dict) -> None:
+    cfg.save({
+        "FB_PAGE_ID": str(page["id"]),
+        "FB_PAGE_NAME": str(page.get("name", "")),
+        "FB_PAGE_ACCESS_TOKEN": str(page["access_token"]),
+    })
+
+
+def fmt_expiry(expires_at_unix: str | None) -> str:
+    """Format a unix-timestamp string as 'Xd Yh remaining' (or 'EXPIRED')."""
+    if not expires_at_unix:
+        return "unknown"
+    try:
+        ts = int(expires_at_unix)
+    except (TypeError, ValueError):
+        return f"unparseable: {expires_at_unix!r}"
+    remaining = ts - int(time.time())
+    if remaining <= 0:
+        return "EXPIRED"
+    days = remaining // 86400
+    hours = (remaining % 86400) // 3600
+    return f"{days}d {hours}h remaining"
 
 
 # ---------- Schedule time parser ----------
