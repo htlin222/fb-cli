@@ -279,14 +279,61 @@ def exchange_to_long_lived(cfg: Config, short_token: str) -> dict:
 refresh_long_lived = exchange_to_long_lived
 
 
-def fetch_pages(user_token: str) -> list[dict]:
-    """GET /me/accounts -> list of pages where the user is admin.
+def fetch_pages(cfg: Config, user_token: str) -> list[dict]:
+    """Return list of pages this user token can operate on, with per-page tokens.
 
-    Each item carries an ``access_token`` field which is the *permanent*
-    per-page token used for day-to-day calls.
+    Handles two OAuth flows:
+
+    - **Classic FB Login**: ``/me/accounts`` returns pages with their access tokens.
+    - **FB Login for Business** (granular scopes): ``/me/accounts`` returns empty;
+      page IDs live in the user token's ``granular_scopes.target_ids``. We fetch
+      each via ``/<page-id>?fields=id,name,access_token,category,tasks``.
+
+    We try classic first; if empty, fall back to the granular-scopes path. Both
+    return the same dict shape so callers don't care which flow was used.
     """
-    out = gget("/me/accounts", user_token)
-    return out.get("data", [])
+    out = gget("/me/accounts", user_token, fields="id,name,access_token,category,tasks")
+    pages = out.get("data", [])
+    if pages:
+        return pages
+
+    # Fall back: granular_scopes from debug_token. This needs the app token.
+    app_id, app_secret = cfg.require("FB_APP_ID", "FB_APP_SECRET")
+    app_token = f"{app_id}|{app_secret}"
+    r = requests.get(
+        f"{GRAPH}/debug_token",
+        params={"input_token": user_token, "access_token": app_token},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise _parse_error(r)
+    granular = r.json().get("data", {}).get("granular_scopes", [])
+    page_ids: list[str] = []
+    seen: set[str] = set()
+    for entry in granular:
+        if not entry.get("scope", "").startswith("pages_"):
+            continue
+        for tid in entry.get("target_ids") or []:
+            sid = str(tid)
+            if sid not in seen:
+                seen.add(sid)
+                page_ids.append(sid)
+
+    pages = []
+    for pid in page_ids:
+        try:
+            # Note: `tasks` exists on /me/accounts response items but NOT on
+            # the Page node itself, so it's omitted here.
+            page = gget(
+                f"/{pid}", user_token,
+                fields="id,name,access_token,category",
+            )
+            pages.append(page)
+        except ApiError:
+            # Skip pages we can't read for whatever reason; surface via cmd_pages
+            # but don't break auth flow over a single inaccessible page.
+            continue
+    return pages
 
 
 def persist_user_token(cfg: Config, token: str, expires_in: int | None) -> None:

@@ -82,8 +82,8 @@ def cmd_auth(args: argparse.Namespace) -> None:
     persist_user_token(cfg, long_token, longl.get("expires_in"))
     days = int(longl.get("expires_in", 0)) // 86400
     print(f"[ok] long-lived user token saved (valid {days}d)")
-    print("[..] fetching pages via /me/accounts...")
-    pages = fetch_pages(long_token)
+    print("[..] fetching granted pages...")
+    pages = fetch_pages(cfg, long_token)
     if not pages:
         print("[!] you don't admin any pages. fb-cli needs at least one.",
               file=sys.stderr)
@@ -114,7 +114,7 @@ def cmd_refresh(args: argparse.Namespace) -> None:
     cfg = Config.load(ENV_PATH)
     page_id = cfg.get("FB_PAGE_ID")
     if page_id:
-        pages = fetch_pages(longl["access_token"])
+        pages = fetch_pages(cfg, longl["access_token"])
         target = next((p for p in pages if p["id"] == page_id), None)
         if target:
             persist_page(cfg, target)
@@ -147,7 +147,7 @@ def cmd_whoami(args: argparse.Namespace) -> None:
 def cmd_pages(args: argparse.Namespace) -> None:
     cfg = Config.load(ENV_PATH)
     user_token = cfg.require("FB_USER_ACCESS_TOKEN")[0]
-    pages = fetch_pages(user_token)
+    pages = fetch_pages(cfg, user_token)
     # Strip per-page access_token before printing -- it's a secret.
     safe = [
         {k: p.get(k) for k in ("id", "name", "category", "tasks")} for p in pages
@@ -339,7 +339,7 @@ def main() -> None:
             longl = exchange_to_long_lived(cfg, user_token)
             persist_user_token(cfg, longl["access_token"], longl.get("expires_in"))
             cfg = Config.load(ENV_PATH)
-            pages = fetch_pages(longl["access_token"])
+            pages = fetch_pages(cfg, longl["access_token"])
             target = next((p for p in pages if p["id"] == page_id), None)
             if not target:
                 print(f"[!] page {page_id} no longer in /me/accounts; run: make auth",
