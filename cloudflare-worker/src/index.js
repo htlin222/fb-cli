@@ -32,7 +32,7 @@ export default {
       if (!code || !state) {
         return new Response("missing code or state", { status: 400 });
       }
-      await env.THREADS_AUTH.put(`code:${state}`, code, { expirationTtl: 600 });
+      await env.FB_AUTH.put(`code:${state}`, code, { expirationTtl: 600 });
       return new Response(HTML_OK, {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
@@ -41,16 +41,16 @@ export default {
     if (url.pathname === "/poll") {
       const state = url.searchParams.get("state");
       if (!state) return new Response("missing state", { status: 400 });
-      const code = await env.THREADS_AUTH.get(`code:${state}`);
+      const code = await env.FB_AUTH.get(`code:${state}`);
       if (!code) return new Response("", { status: 204 });
-      await env.THREADS_AUTH.delete(`code:${state}`);
+      await env.FB_AUTH.delete(`code:${state}`);
       return new Response(code, {
         headers: { "content-type": "text/plain" },
       });
     }
 
     if (url.pathname === "/" || url.pathname === "/health") {
-      return new Response("threads-cb worker ok", { status: 200 });
+      return new Response("fb-cb worker ok", { status: 200 });
     }
 
     return new Response("not found", { status: 404 });

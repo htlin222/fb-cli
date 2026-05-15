@@ -7,5 +7,5 @@ compatibility_date = "2025-01-01"
 # then paste the returned id here and uncomment the binding below.
 
 [[kv_namespaces]]
-binding = "THREADS_AUTH"   # binding name kept as-is so the verbatim worker source compiles
-id = "REPLACE_ME_WITH_KV_NAMESPACE_ID"
+binding = "FB_AUTH"
+id = "d2a48843ed9e43219d7f7c918ed232ff"
