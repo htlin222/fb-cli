@@ -236,18 +236,63 @@ def cmd_conversation(args: argparse.Namespace) -> None:
 def cmd_reactions(args: argparse.Namespace) -> None:
     cfg = Config.load(ENV_PATH)
     page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
-    # FB Graph field expansion: get per-type totals in a single call via aliases.
+    pp(_reactions_for(args.id, page_token))
+
+
+def _reactions_for(post_id: str, page_token: str) -> dict:
+    """GET per-type reaction counts for a post via Graph field expansion.
+
+    One round-trip thanks to aliased subqueries on the post node.
+    """
     fields = ",".join(
         f"reactions.type({t}).summary(total_count).limit(0).as({t.lower()})"
         for t in REACTION_TYPES
     )
-    out = gget(f"/{args.id}", page_token, fields=f"id,{fields}")
+    out = gget(f"/{post_id}", page_token, fields=f"id,{fields}")
     breakdown = {
         t: out.get(t.lower(), {}).get("summary", {}).get("total_count", 0)
         for t in REACTION_TYPES
     }
     breakdown["TOTAL"] = sum(breakdown.values())
-    pp({"id": out["id"], "reactions": breakdown})
+    return {"id": out["id"], "reactions": breakdown}
+
+
+def cmd_latest(args: argparse.Namespace) -> None:
+    """Print just the most recent post id, one line. Designed for piping.
+
+    Usage:  ID=$(make -s latest) make get ID=$ID  /  make insights ID=$ID
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    out = gget(f"/{page_id}/posts", page_token, fields="id", limit=1)
+    data = out.get("data", [])
+    if not data:
+        print("(no posts on this page)", file=sys.stderr)
+        sys.exit(1)
+    print(data[0]["id"])
+
+
+def cmd_summary(args: argparse.Namespace) -> None:
+    """Latest post + reaction breakdown + comment count, in one shot.
+
+    The day-to-day 'how's my latest post doing?' helper.
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    out = gget(
+        f"/{page_id}/posts", page_token,
+        fields=_POST_FIELDS + ",comments.summary(total_count).limit(0)",
+        limit=1,
+    )
+    posts = out.get("data", [])
+    if not posts:
+        print("(no posts on this page)", file=sys.stderr)
+        sys.exit(1)
+    post = posts[0]
+    post_id = post["id"]
+    comment_count = post.pop("comments", {}).get("summary", {}).get("total_count", 0)
+    reactions = _reactions_for(post_id, page_token)["reactions"]
+    pp({"post": post, "reactions": reactions, "comment_count": comment_count})
 
 
 # ---------- Manage comments (phase 5) ----------
@@ -340,6 +385,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     rx = sub.add_parser("reactions"); rx.set_defaults(func=cmd_reactions)
     rx.add_argument("id")
+
+    # DX helpers: refer to the latest post by 'shape' instead of a long id
+    sub.add_parser("latest").set_defaults(func=cmd_latest)
+    sub.add_parser("summary").set_defaults(func=cmd_summary)
 
     # Manage
     rp = sub.add_parser("reply"); rp.set_defaults(func=cmd_reply)

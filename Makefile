@@ -7,11 +7,12 @@ RUN := $(shell command -v uv >/dev/null 2>&1 && echo "uv run" || echo "python3")
 .PHONY: help \
   post post-image post-video post-carousel post-link schedule \
   edit delete \
-  list get comments conversation reactions \
+  list get comments conversation reactions latest summary \
   reply delete-comment hide unhide \
   insights page-insights \
   pages whoami refresh auth limits \
-  smoke worker-deploy worker-tail worker-delete env-check test
+  smoke worker-deploy worker-tail worker-delete env-check test \
+  get-latest comments-latest reactions-latest delete-latest
 
 help: ## show this help
 	@echo "fb-cli -- Facebook Pages CLI ('make <target>' wraps 'uv run fb.py <subcmd>')"
@@ -34,6 +35,14 @@ help: ## show this help
 	@echo "  make comments ID=<post-id>                    comments on a post"
 	@echo "  make conversation ID=<comment-id>             nested replies under a comment"
 	@echo "  make reactions ID=<post-id>                   per-type reaction breakdown"
+	@echo ""
+	@echo "Shortcuts on the latest post:"
+	@echo "  make latest                                   print latest post id (one line)"
+	@echo "  make summary                                  latest post + reactions + comment count"
+	@echo "  make get-latest                               make get on the latest post"
+	@echo "  make comments-latest                          make comments on the latest post"
+	@echo "  make reactions-latest                         make reactions on the latest post"
+	@echo "  make delete-latest                            make delete on the latest post (with confirm)"
 	@echo ""
 	@echo "Manage comments:"
 	@echo "  make reply TO=<comment-id> MSG=\"...\"           reply to a comment"
@@ -117,6 +126,30 @@ conversation: ## nested replies under a comment
 reactions: ## per-type reaction breakdown
 	@test -n "$(ID)" || (echo "usage: make reactions ID=<post-id>"; exit 2)
 	$(RUN) fb.py reactions "$(ID)"
+
+# ---- Shortcuts on the latest post -----------------------------------------
+# These resolve "the latest post id" via `fb.py latest` so you don't have to
+# copy-paste long IDs around.
+
+latest: ## print latest post id, one line (scriptable)
+	@$(RUN) fb.py latest
+
+summary: ## latest post + reactions + comment count (one shot)
+	$(RUN) fb.py summary
+
+get-latest: ## make get on the latest post
+	@ID=$$($(RUN) fb.py latest) && $(RUN) fb.py get "$$ID"
+
+comments-latest: ## make comments on the latest post
+	@ID=$$($(RUN) fb.py latest) && $(RUN) fb.py comments "$$ID"
+
+reactions-latest: ## make reactions on the latest post
+	@ID=$$($(RUN) fb.py latest) && $(RUN) fb.py reactions "$$ID"
+
+delete-latest: ## make delete on the latest post (with confirmation)
+	@ID=$$($(RUN) fb.py latest) && \
+	read -p "delete post $$ID? [y/N] " a && [ "$$a" = "y" ] && \
+	$(RUN) fb.py delete "$$ID"
 
 # ---- Manage comments -------------------------------------------------------
 
