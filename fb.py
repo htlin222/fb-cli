@@ -177,26 +177,77 @@ def cmd_delete(args: argparse.Namespace) -> None:
     _todo("cmd_delete")
 
 
-# ---------- Read (phase 3) ----------
+# ---------- Read ----------
+
+# Fields requested when listing or fetching a single post.
+_POST_FIELDS = (
+    "id,message,story,created_time,updated_time,permalink_url,"
+    "status_type,is_published,shares,attachments{type,title,media,url}"
+)
+
+# Fields requested when listing comments.
+_COMMENT_FIELDS = (
+    "id,from{id,name},message,created_time,like_count,comment_count,can_hide"
+)
+
+REACTION_TYPES = ("LIKE", "LOVE", "WOW", "HAHA", "SAD", "ANGRY")
+
 
 def cmd_list(args: argparse.Namespace) -> None:
-    _todo("cmd_list")
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    out = gget(
+        f"/{page_id}/posts", page_token,
+        fields=_POST_FIELDS,
+        limit=args.limit,
+    )
+    pp(out.get("data", []))
 
 
 def cmd_get(args: argparse.Namespace) -> None:
-    _todo("cmd_get")
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    out = gget(f"/{args.id}", page_token, fields=_POST_FIELDS)
+    pp(out)
 
 
 def cmd_comments(args: argparse.Namespace) -> None:
-    _todo("cmd_comments")
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    out = gget(
+        f"/{args.id}/comments", page_token,
+        fields=_COMMENT_FIELDS,
+        order="reverse_chronological",
+    )
+    pp(out.get("data", []))
 
 
 def cmd_conversation(args: argparse.Namespace) -> None:
-    _todo("cmd_conversation")
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    # Nested replies under a comment use the same /comments edge on the comment.
+    out = gget(
+        f"/{args.id}/comments", page_token,
+        fields=_COMMENT_FIELDS,
+    )
+    pp(out.get("data", []))
 
 
 def cmd_reactions(args: argparse.Namespace) -> None:
-    _todo("cmd_reactions")
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    # FB Graph field expansion: get per-type totals in a single call via aliases.
+    fields = ",".join(
+        f"reactions.type({t}).summary(total_count).limit(0).as({t.lower()})"
+        for t in REACTION_TYPES
+    )
+    out = gget(f"/{args.id}", page_token, fields=f"id,{fields}")
+    breakdown = {
+        t: out.get(t.lower(), {}).get("summary", {}).get("total_count", 0)
+        for t in REACTION_TYPES
+    }
+    breakdown["TOTAL"] = sum(breakdown.values())
+    pp({"id": out["id"], "reactions": breakdown})
 
 
 # ---------- Manage comments (phase 5) ----------
