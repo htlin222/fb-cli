@@ -35,7 +35,9 @@ from fb_lib import (
     exchange_to_long_lived,
     fetch_pages,
     fmt_expiry,
+    gdelete,
     gget,
+    gpost,
     persist_page,
     persist_user_token,
     poll_worker_for_code,
@@ -155,10 +157,47 @@ def cmd_pages(args: argparse.Namespace) -> None:
     pp(safe)
 
 
-# ---------- Publish (phase 4) ----------
+# ---------- Publish ----------
 
 def cmd_post(args: argparse.Namespace) -> None:
-    _todo("cmd_post")
+    """Text post (and optional link preview) to /<page-id>/feed.
+
+    Image / video / carousel routing through this same subcommand is
+    deferred to phase 4 step 2+; for now we reject those flags loudly.
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+
+    if args.image_url or args.video_url or args.carousel_urls:
+        flag = (
+            "image-url" if args.image_url
+            else "video-url" if args.video_url
+            else "carousel-urls"
+        )
+        print(f"[TODO] --{flag} not wired up yet (phase 4 step 2+)", file=sys.stderr)
+        sys.exit(64)
+
+    if not args.message and not args.link:
+        raise ValidationError("either MSG=... or --link=... is required for a post")
+
+    params: dict[str, str] = {}
+    if args.message:
+        params["message"] = args.message
+    if args.link:
+        params["link"] = args.link
+
+    out = gpost(f"/{page_id}/feed", page_token, **params)
+    pp(out)
+
+    # FB returns {"id": "<page-id>_<post-id>"} on success; fetch permalink
+    # too so the user has something clickable to verify.
+    post_id = out.get("id")
+    if post_id:
+        try:
+            extra = gget(f"/{post_id}", page_token, fields="permalink_url,created_time")
+            print(f"\npermalink: {extra.get('permalink_url', '(unknown)')}", file=sys.stderr)
+        except ApiError:
+            pass
 
 
 def cmd_post_link(args: argparse.Namespace) -> None:
@@ -174,7 +213,11 @@ def cmd_edit(args: argparse.Namespace) -> None:
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
-    _todo("cmd_delete")
+    """DELETE /<post-id>. Idempotent on Meta side: second call 400s."""
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    out = gdelete(f"/{args.id}", page_token)
+    pp(out)
 
 
 # ---------- Read ----------
