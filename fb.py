@@ -42,9 +42,11 @@ from fb_lib import (
     gpost,
     list_app_subscriptions,
     parse_fb_permalink,
+    parse_schedule_time,
     persist_page,
     persist_user_token,
     poll_worker_for_code,
+    validate_schedule_time,
 )
 
 ENV_PATH = Path(__file__).parent / ".env"
@@ -278,7 +280,23 @@ def cmd_post_link(args: argparse.Namespace) -> None:
 
 
 def cmd_schedule(args: argparse.Namespace) -> None:
-    _todo("cmd_schedule")
+    """Schedule a text post for future publication.
+
+    Uses parse_schedule_time() + validate_schedule_time() shipped in
+    phase 1; the latter rejects anything outside Meta's 10-min-to-6-month
+    window before round-tripping to the API.
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    ts = validate_schedule_time(parse_schedule_time(args.when))
+    print(f"[..] scheduled for unix={ts}", file=sys.stderr)
+    out = gpost(
+        f"/{page_id}/feed", page_token,
+        message=args.message,
+        published="false",
+        scheduled_publish_time=ts,
+    )
+    pp(out)
 
 
 def cmd_edit(args: argparse.Namespace) -> None:
@@ -479,18 +497,76 @@ def cmd_unhide(args: argparse.Namespace) -> None:
     _todo("cmd_unhide")
 
 
-# ---------- Insights (phase 7) ----------
+# ---------- Insights ----------
+
+# Per-post defaults. Probed against Graph v21.0 on 2026-05-17 -- many
+# historical metric names were retired (post_impressions, post_engaged_users,
+# post_activity, post_negative_feedback...). Keep this list to *_unique
+# + clicks + reactions + video, which are the ones still accepted.
+DEFAULT_POST_METRICS = (
+    "post_impressions_unique,"
+    "post_clicks,"
+    "post_reactions_by_type_total,"
+    "post_video_views"
+)
+
+# Page-level defaults. Same v21.0 probe: page_impressions, page_fans, and
+# page_fan_adds are gone. _unique variant + post_engagements + views + total
+# actions are what's left.
+DEFAULT_PAGE_METRICS = (
+    "page_impressions_unique,"
+    "page_post_engagements,"
+    "page_views_total,"
+    "page_total_actions"
+)
+
 
 def cmd_insights(args: argparse.Namespace) -> None:
-    _todo("cmd_insights")
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    metric = args.metric or DEFAULT_POST_METRICS
+    out = gget(f"/{args.id}/insights", page_token, metric=metric)
+    pp(out)
 
 
 def cmd_page_insights(args: argparse.Namespace) -> None:
-    _todo("cmd_page_insights")
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    metric = args.metric or DEFAULT_PAGE_METRICS
+    params: dict[str, str] = {"metric": metric}
+    if args.since:
+        params["since"] = args.since
+    if args.until:
+        params["until"] = args.until
+    if args.period:
+        params["period"] = args.period
+    out = gget(f"/{page_id}/insights", page_token, **params)
+    pp(out)
 
 
 def cmd_limits(args: argparse.Namespace) -> None:
-    _todo("cmd_limits")
+    """Probe rate-limit headers via a cheap GET /me call.
+
+    FB doesn't expose a counter endpoint -- usage lives in response
+    headers on every request. We poke /me and surface the three usage
+    headers Meta documents.
+    """
+    cfg = Config.load(ENV_PATH)
+    user_token = cfg.require("FB_USER_ACCESS_TOKEN")[0]
+    import requests as _r  # local: keeps top-of-file imports clean
+    r = _r.get(
+        f"https://graph.facebook.com/v21.0/me",
+        params={"access_token": user_token, "fields": "id"},
+        timeout=15,
+    )
+    out = {
+        "http_status": r.status_code,
+        "x_app_usage": r.headers.get("x-app-usage"),
+        "x_page_usage": r.headers.get("x-page-usage"),
+        "x_business_use_case_usage": r.headers.get("x-business-use-case-usage"),
+        "x_fb_api_caller_class": r.headers.get("x-fb-api-caller-class"),
+    }
+    pp(out)
 
 
 # ---------- Smoke ----------
@@ -588,7 +664,11 @@ def build_parser() -> argparse.ArgumentParser:
     ins.add_argument("id")
     ins.add_argument("--metric")
 
-    sub.add_parser("page-insights").set_defaults(func=cmd_page_insights)
+    pi = sub.add_parser("page-insights"); pi.set_defaults(func=cmd_page_insights)
+    pi.add_argument("--metric")
+    pi.add_argument("--since")
+    pi.add_argument("--until")
+    pi.add_argument("--period", help="day|week|days_28|month|lifetime (default: day)")
 
     # Smoke
     sub.add_parser("smoke").set_defaults(func=cmd_smoke)
