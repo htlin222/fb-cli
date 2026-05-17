@@ -11,6 +11,7 @@ RUN := $(shell command -v uv >/dev/null 2>&1 && echo "uv run" || echo "python3")
   reply delete-comment hide unhide \
   insights page-insights \
   pages whoami refresh auth limits \
+  mentions subscribe-page \
   smoke worker-deploy worker-tail worker-delete env-check test \
   get-latest comments-latest reactions-latest delete-latest
 
@@ -61,6 +62,10 @@ help: ## show this help
 	@echo "  make whoami                                    /me + page id + token expiry"
 	@echo "  make pages                                     list pages I admin"
 	@echo "  make env-check                                 sanity-check .env"
+	@echo ""
+	@echo "Mentions / webhook:"
+	@echo "  make subscribe-page                            tell Meta to push events for Dr.蜥蜴"
+	@echo "  make mentions [SINCE=<unix_ms>]                poll worker for received events"
 	@echo ""
 	@echo "Worker:"
 	@echo "  make worker-deploy                             redeploy fb-cb worker"
@@ -194,6 +199,14 @@ whoami: ## /me + page id + token expiry
 
 pages: ## list pages I admin
 	$(RUN) fb.py pages
+
+# ---- Mentions / webhook ----------------------------------------------------
+
+subscribe-page: ## tell Meta to push webhook events for the configured Page
+	$(RUN) fb.py subscribe-page $(if $(FIELDS),--fields "$(FIELDS)",)
+
+mentions: ## poll the worker for received webhook events
+	$(RUN) fb.py mentions $(if $(SINCE),--since $(SINCE),)
 
 # ---- Demo / worker / env ---------------------------------------------------
 

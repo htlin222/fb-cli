@@ -46,6 +46,7 @@ def test_scopes_includes_required_for_a2():
         "pages_manage_posts",
         "pages_manage_engagement",
         "pages_read_user_content",
+        "pages_manage_metadata",  # for /subscribed_apps (webhook subscribe)
         "read_insights",
         "public_profile",
     }

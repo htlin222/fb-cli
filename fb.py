@@ -33,6 +33,7 @@ from fb_lib import (
     build_auth_url,
     exchange_code_for_short_token,
     exchange_to_long_lived,
+    fetch_mentions,
     fetch_pages,
     fmt_expiry,
     gdelete,
@@ -155,6 +156,36 @@ def cmd_pages(args: argparse.Namespace) -> None:
         {k: p.get(k) for k in ("id", "name", "category", "tasks")} for p in pages
     ]
     pp(safe)
+
+
+def cmd_subscribe_page(args: argparse.Namespace) -> None:
+    """POST /<page-id>/subscribed_apps with subscribed_fields=<comma-sep>.
+
+    Tells Meta: "for this Page, push events on these fields to my app's
+    configured webhook URL." Required after configuring the webhook in the
+    Dashboard, otherwise Meta knows the URL but never sends events for this
+    specific Page.
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    # Meta uses singular `mention` (per /subscribed_apps schema).
+    fields = args.fields or "mention,feed"
+    out = gpost(f"/{page_id}/subscribed_apps", page_token, subscribed_fields=fields)
+    pp({"subscribed_fields": fields, "response": out})
+
+
+def cmd_mentions(args: argparse.Namespace) -> None:
+    """Poll the Cloudflare Worker for stored mention events.
+
+    The worker received them via POST /webhook (HMAC-verified). They live
+    in KV for 7 days. Pass --since=<unix_ms> to filter out already-seen.
+    """
+    cfg = Config.load(ENV_PATH)
+    worker_base, verify_token = cfg.require(
+        "FB_WORKER_BASE", "FB_WEBHOOK_VERIFY_TOKEN"
+    )
+    body = fetch_mentions(worker_base, verify_token, since_ms=args.since)
+    pp(body)
 
 
 # ---------- Publish ----------
@@ -338,10 +369,19 @@ def cmd_summary(args: argparse.Namespace) -> None:
     pp({"post": post, "reactions": reactions, "comment_count": comment_count})
 
 
-# ---------- Manage comments (phase 5) ----------
+# ---------- Manage comments ----------
 
 def cmd_reply(args: argparse.Namespace) -> None:
-    _todo("cmd_reply")
+    """POST /<parent-id>/comments. The parent can be a post OR a comment.
+
+    For Page-owned posts this just works. For non-Page posts (e.g., a user's
+    own post that tags the Page), Meta may gate behind Page Public Content
+    Access -- expect code 10 in that case.
+    """
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    out = gpost(f"/{args.to}/comments", page_token, message=args.message)
+    pp(out)
 
 
 def cmd_delete_comment(args: argparse.Namespace) -> None:
@@ -389,6 +429,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("whoami").set_defaults(func=cmd_whoami)
     sub.add_parser("pages").set_defaults(func=cmd_pages)
     sub.add_parser("limits").set_defaults(func=cmd_limits)
+
+    sp = sub.add_parser("subscribe-page"); sp.set_defaults(func=cmd_subscribe_page)
+    sp.add_argument("--fields", help="comma-separated (default: mentions,feed)")
+
+    mn = sub.add_parser("mentions"); mn.set_defaults(func=cmd_mentions)
+    mn.add_argument("--since", type=int, default=0, help="unix ms; show events newer than")
 
     # Publish
     pp_ = sub.add_parser("post"); pp_.set_defaults(func=cmd_post)

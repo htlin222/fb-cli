@@ -33,6 +33,7 @@ SCOPES: tuple[str, ...] = (
     "pages_manage_posts",
     "pages_manage_engagement",
     "pages_read_user_content",
+    "pages_manage_metadata",  # required for /subscribed_apps (webhook subscribe)
     "read_insights",
 )
 
@@ -349,6 +350,26 @@ def persist_page(cfg: Config, page: dict) -> None:
         "FB_PAGE_NAME": str(page.get("name", "")),
         "FB_PAGE_ACCESS_TOKEN": str(page["access_token"]),
     })
+
+
+def fetch_mentions(worker_base: str, verify_token: str, since_ms: int = 0) -> dict:
+    """Poll the Cloudflare Worker's /mentions endpoint.
+
+    Returns ``{"events": [...], "count": N}``. ``verify_token`` is the same
+    shared secret used in the Meta webhook handshake; it doubles as the
+    bearer for this read endpoint.
+    """
+    r = requests.get(
+        f"{worker_base.rstrip('/')}/mentions",
+        params={"token": verify_token, "since": since_ms},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise ApiError(
+            status=r.status_code, code=None, subcode=None,
+            message=f"worker /mentions: {r.text[:200]}",
+        )
+    return r.json()
 
 
 def fmt_expiry(expires_at_unix: str | None) -> str:
