@@ -213,38 +213,38 @@ def cmd_webhook_setup(args: argparse.Namespace) -> None:
 # ---------- Publish ----------
 
 def cmd_post(args: argparse.Namespace) -> None:
-    """Text post (and optional link preview) to /<page-id>/feed.
-
-    Image / video / carousel routing through this same subcommand is
-    deferred to phase 4 step 2+; for now we reject those flags loudly.
+    """Post to /<page-id>/feed (text + optional link) or /<page-id>/photos
+    (when ``--image-url`` is set). Video / carousel still deferred.
     """
     cfg = Config.load(ENV_PATH)
     page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
 
-    if args.image_url or args.video_url or args.carousel_urls:
-        flag = (
-            "image-url" if args.image_url
-            else "video-url" if args.video_url
-            else "carousel-urls"
-        )
-        print(f"[TODO] --{flag} not wired up yet (phase 4 step 2+)", file=sys.stderr)
+    if args.video_url or args.carousel_urls:
+        flag = "video-url" if args.video_url else "carousel-urls"
+        print(f"[TODO] --{flag} not wired up yet (separate phase)", file=sys.stderr)
         sys.exit(64)
 
-    if not args.message and not args.link:
-        raise ValidationError("either MSG=... or --link=... is required for a post")
+    if args.image_url:
+        # Photo post: POST /<page-id>/photos with url + caption.
+        # FB returns {"id": "<photo-id>", "post_id": "<page-id>_<post-id>"}.
+        params = {"url": args.image_url}
+        if args.message:
+            params["caption"] = args.message
+        out = gpost(f"/{page_id}/photos", page_token, **params)
+        pp(out)
+        post_id = out.get("post_id") or out.get("id")
+    else:
+        if not args.message and not args.link:
+            raise ValidationError("either MSG=... or --link=... is required for a post")
+        params: dict[str, str] = {}
+        if args.message:
+            params["message"] = args.message
+        if args.link:
+            params["link"] = args.link
+        out = gpost(f"/{page_id}/feed", page_token, **params)
+        pp(out)
+        post_id = out.get("id")
 
-    params: dict[str, str] = {}
-    if args.message:
-        params["message"] = args.message
-    if args.link:
-        params["link"] = args.link
-
-    out = gpost(f"/{page_id}/feed", page_token, **params)
-    pp(out)
-
-    # FB returns {"id": "<page-id>_<post-id>"} on success; fetch permalink
-    # too so the user has something clickable to verify.
-    post_id = out.get("id")
     if post_id:
         try:
             extra = gget(f"/{post_id}", page_token, fields="permalink_url,created_time")
@@ -254,7 +254,27 @@ def cmd_post(args: argparse.Namespace) -> None:
 
 
 def cmd_post_link(args: argparse.Namespace) -> None:
-    _todo("cmd_post_link")
+    """Dedicated link post: POST /<page-id>/feed with both `link` and `message`.
+
+    Distinct from `make post MSG="..." LINK="..."` in semantics: the link
+    field makes FB render this as a Link post (with OG preview card) rather
+    than a Text post that happens to contain a URL.
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    out = gpost(
+        f"/{page_id}/feed", page_token,
+        link=args.url,
+        message=args.message,
+    )
+    pp(out)
+    post_id = out.get("id")
+    if post_id:
+        try:
+            extra = gget(f"/{post_id}", page_token, fields="permalink_url")
+            print(f"\npermalink: {extra.get('permalink_url', '(unknown)')}", file=sys.stderr)
+        except ApiError:
+            pass
 
 
 def cmd_schedule(args: argparse.Namespace) -> None:
@@ -262,7 +282,21 @@ def cmd_schedule(args: argparse.Namespace) -> None:
 
 
 def cmd_edit(args: argparse.Namespace) -> None:
-    _todo("cmd_edit")
+    """POST /<post-id> with `message=<new>` to update the post text.
+
+    FB only allows editing `message` -- media is immutable. Page admin
+    can edit any post the Page owns; we fail-fast if the post id prefix
+    doesn't match $FB_PAGE_ID (Meta also enforces, but cheap to check).
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    # Graph post ids look like <owner>_<short>; fail-fast on cross-page edits
+    if "_" in args.id and not args.id.startswith(f"{page_id}_"):
+        raise ValidationError(
+            f"post {args.id!r} doesn't belong to FB_PAGE_ID {page_id} -- can't edit"
+        )
+    out = gpost(f"/{args.id}", page_token, message=args.message)
+    pp(out)
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
