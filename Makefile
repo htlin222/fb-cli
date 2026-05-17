@@ -8,7 +8,7 @@ RUN := $(shell command -v uv >/dev/null 2>&1 && echo "uv run" || echo "python3")
   post post-image post-video post-carousel post-link schedule \
   edit delete \
   list get comments conversation reactions latest summary \
-  reply delete-comment hide unhide \
+  reply reply-url delete-comment hide unhide \
   insights page-insights \
   pages whoami refresh auth limits \
   mentions subscribe-page webhook-setup \
@@ -46,7 +46,8 @@ help: ## show this help
 	@echo "  make delete-latest                            make delete on the latest post (with confirm)"
 	@echo ""
 	@echo "Manage comments:"
-	@echo "  make reply TO=<comment-id> MSG=\"...\"           reply to a comment"
+	@echo "  make reply TO=<id> MSG=\"...\"                  reply to a post or comment"
+	@echo "  make reply-url URL=<permalink> MSG=\"...\"      reply by FB permalink (manual mention)"
 	@echo "  make delete-comment ID=<comment-id>            delete a comment"
 	@echo "  make hide ID=<comment-id>                      hide a comment"
 	@echo "  make unhide ID=<comment-id>                    unhide a comment"
@@ -159,9 +160,13 @@ delete-latest: ## make delete on the latest post (with confirmation)
 
 # ---- Manage comments -------------------------------------------------------
 
-reply: ## reply to a comment; usage: make reply TO=<comment-id> MSG="..."
-	@test -n "$(TO)" -a -n "$(MSG)" || (echo "usage: make reply TO=<comment-id> MSG=\"...\""; exit 2)
+reply: ## reply to a post or comment; usage: make reply TO=<id> MSG="..."
+	@test -n "$(TO)" -a -n "$(MSG)" || (echo "usage: make reply TO=<post-or-comment-id> MSG=\"...\""; exit 2)
 	$(RUN) fb.py reply "$(TO)" "$(MSG)"
+
+reply-url: ## reply to a post by its FB permalink (manual mention workflow)
+	@test -n "$(URL)" -a -n "$(MSG)" || (echo "usage: make reply-url URL=<fb-post-permalink> MSG=\"...\""; exit 2)
+	$(RUN) fb.py reply-url "$(URL)" "$(MSG)"
 
 delete-comment: ## delete a comment
 	@test -n "$(ID)" || (echo "usage: make delete-comment ID=<comment-id>"; exit 2)

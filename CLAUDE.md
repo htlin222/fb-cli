@@ -26,6 +26,8 @@ same pattern, different Meta product. **Currently in phase 1 scaffolding**
 | "看 <comment-id> 下面的對話"                                      | `make conversation ID=<comment-id>`                    |
 | "reactions <post-id>" / "看誰按讚"                                | `make reactions ID=<post-id>`                          |
 | "reply <comment-id> X" / "回 <comment-id>"                       | `make reply TO=<comment-id> MSG="X"`                   |
+| "回那篇 tag 我的" / 看到 FB 通知有人 tag                          | `make reply-url URL=<permalink> MSG="X"` (manual flow) |
+| "看 mentions" / "誰 tag 我"                                       | `make mentions` (returns `[]` in dev mode; see below)  |
 | "刪 comment <id>"                                                | `make delete-comment ID=<id>`                          |
 | "隱藏 comment <id>" / "hide"                                     | `make hide ID=<id>`                                    |
 | "取消隱藏 <id>"                                                  | `make unhide ID=<id>`                                  |
@@ -105,11 +107,39 @@ chars only when you need to show progress.
 ## Cloudflare Worker
 
 - Deployed URL is in `$FB_WORKER_BASE` in `.env` (gitignored). Don't paste the literal URL here.
-- Source: `cloudflare-worker/src/index.js` (verbatim copy of threads-cb).
-- Config: `cloudflare-worker/wrangler.toml`, name `fb-cb`.
-- **Don't redeploy** unless source/config changed. If needed: `make worker-deploy`.
-- KV namespace `THREADS_AUTH` (binding name kept for source verbatim-ness; the namespace is a separate FB-only one) stores OAuth codes keyed by `state` (TTL 10min).
-- Logs: `make worker-tail`.
+- Source: `cloudflare-worker/src/index.js`. Config: `cloudflare-worker/wrangler.toml`, name `fb-cb`.
+- Routes: `/callback` + `/poll` (OAuth relay), `/webhook` GET+POST (Meta events), `/mentions` (CLI poll), `/health`.
+- KV namespace binding `FB_AUTH` stores both OAuth codes (key `code:<state>`, 10 min TTL) and mention events (key `mention:<unix_ms>:<entry>:<rand>`, 7-day TTL).
+- Worker secrets (set via `wrangler secret put`): `FB_APP_SECRET` (HMAC verify), `FB_WEBHOOK_VERIFY_TOKEN` (Meta handshake + CLI bearer).
+- **Don't redeploy** unless source/config changed. If needed: `make worker-deploy`. Logs: `make worker-tail`.
+
+## Mentions / webhooks (Dev mode caveat)
+
+The webhook pipeline is **fully built** (`make webhook-setup` registers the
+app-level subscription, `make subscribe-page` registers Dr.蜥蜴, worker
+HMAC-verifies + stores events, `make mentions` polls). All of it is
+verified end-to-end against a synthetic signed POST.
+
+**But Meta won't actually deliver real events until the app is published
+"Live".** Apps using "Facebook Login for Business" in Development mode
+silently drop webhook deliveries — Meta confirmed this is by design in
+developer-community threads. Workaround = App Review (1-2 weeks).
+
+So mentions today are **manual**:
+
+1. User notices the tag in FB's notification UI (we can't poll it via API).
+2. User copies the post permalink.
+3. Run `make reply-url URL=<permalink> MSG="..."` -- parses the
+   permalink into `<owner>_<short>` and POSTs the comment. Falls back to
+   `$FB_PAGE_ID` as owner if Meta's permalink owner alias differs from
+   the Graph-API id.
+
+Replies to **non-Page posts** (e.g., a user tagged the Page in their
+personal post) may still 403 with code 10 -- that's Page Public Content
+Access, same App Review gate. Replies to Page-owned posts always work.
+
+**Don't try to "fix" mentions in dev mode.** The infra is correct; Meta
+is the blocker. Document, move on, revisit if the app gets published.
 
 ## Recovery / debug ladder
 

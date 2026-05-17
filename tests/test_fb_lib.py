@@ -25,6 +25,7 @@ from fb_lib import (
     Config,
     ValidationError,
     build_auth_url,
+    parse_fb_permalink,
     parse_schedule_time,
     validate_schedule_time,
 )
@@ -115,6 +116,55 @@ def test_validate_schedule_time_bounds():
         validate_schedule_time(now + 365 * 86400, now=lambda: now)
     # Just inside upper bound (6 months)
     assert validate_schedule_time(now + SCHEDULE_MAX_DELTA_SEC, now=lambda: now) == now + SCHEDULE_MAX_DELTA_SEC
+
+
+# ---------- parse_fb_permalink ----------
+
+
+def test_parse_permalink_standard():
+    assert parse_fb_permalink(
+        "https://www.facebook.com/123/posts/456"
+    ) == ("123", "456")
+
+
+def test_parse_permalink_m_subdomain():
+    assert parse_fb_permalink(
+        "https://m.facebook.com/123/posts/456"
+    ) == ("123", "456")
+
+
+def test_parse_permalink_with_query():
+    assert parse_fb_permalink(
+        "https://www.facebook.com/950244931183198/posts/950257811181910?notif_id=x"
+    ) == ("950244931183198", "950257811181910")
+
+
+def test_parse_permalink_username_owner():
+    # Vanity URLs use the username, not the numeric id.
+    assert parse_fb_permalink(
+        "https://www.facebook.com/zuck/posts/789"
+    ) == ("zuck", "789")
+
+
+def test_parse_permalink_story_php():
+    assert parse_fb_permalink(
+        "https://www.facebook.com/story.php?story_fbid=456&id=123"
+    ) == ("123", "456")
+
+
+def test_parse_permalink_permalink_php():
+    assert parse_fb_permalink(
+        "https://www.facebook.com/permalink.php?story_fbid=456&id=123&ref=x"
+    ) == ("123", "456")
+
+
+def test_parse_permalink_raises_on_garbage():
+    with pytest.raises(ValidationError):
+        parse_fb_permalink("not a url")
+    with pytest.raises(ValidationError):
+        parse_fb_permalink("https://example.com/foo/bar")
+    with pytest.raises(ValidationError):
+        parse_fb_permalink("https://www.facebook.com/")
 
 
 # ---------- Config ----------

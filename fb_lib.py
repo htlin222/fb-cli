@@ -49,6 +49,12 @@ CAROUSEL_MAX = 10
 RELATIVE_WHEN_RE = re.compile(r"^\+(\d+)([mhd])$")  # +30m / +2h / +1d
 ABSOLUTE_WHEN_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$")
 
+# Facebook post permalink: https://www.facebook.com/<owner>/posts/<short>[?...]
+PERMALINK_RE = re.compile(
+    r"^https?://(?:www\.|m\.|web\.|mbasic\.)?facebook\.com/"
+    r"(?P<owner>[^/?#]+)/posts/(?P<short>[^/?#]+)"
+)
+
 
 # ---------- Typed errors ----------
 
@@ -466,6 +472,34 @@ def parse_schedule_time(when: str, *, now=time.time) -> int:
         f"WHEN={when!r} not recognized. "
         "Use '+30m' / '+2h' / '+1d' or 'YYYY-MM-DD HH:MM'."
     )
+
+
+def parse_fb_permalink(url: str) -> tuple[str, str]:
+    """Parse a Facebook post permalink into ``(owner, short_id)``.
+
+    Handles:
+      - https://www.facebook.com/<owner-id-or-username>/posts/<short>[?...]
+      - https://m.facebook.com/...                                 (mobile)
+      - https://www.facebook.com/permalink.php?story_fbid=<s>&id=<o>
+      - https://www.facebook.com/story.php?story_fbid=<s>&id=<o>
+
+    The Graph post id is conventionally ``<owner>_<short>``, but the
+    permalink's owner segment may differ from ``$FB_PAGE_ID`` (Meta uses
+    a user-facing redirect alias). Callers should try the parsed owner
+    first, then fall back to ``$FB_PAGE_ID``.
+    """
+    url = url.strip()
+    m = PERMALINK_RE.match(url)
+    if m:
+        return m.group("owner"), m.group("short")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.netloc.endswith("facebook.com") and parsed.path in ("/permalink.php", "/story.php"):
+        qs = urllib.parse.parse_qs(parsed.query)
+        owner = (qs.get("id") or [None])[0]
+        short = (qs.get("story_fbid") or [None])[0]
+        if owner and short:
+            return owner, short
+    raise ValidationError(f"unrecognized FB permalink: {url!r}")
 
 
 def validate_schedule_time(ts: int, *, now=time.time) -> int:

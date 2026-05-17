@@ -41,6 +41,7 @@ from fb_lib import (
     gget,
     gpost,
     list_app_subscriptions,
+    parse_fb_permalink,
     persist_page,
     persist_user_token,
     poll_worker_for_code,
@@ -405,6 +406,33 @@ def cmd_reply(args: argparse.Namespace) -> None:
     pp(out)
 
 
+def cmd_reply_url(args: argparse.Namespace) -> None:
+    """Reply to a post identified by its FB permalink (semi-manual mention flow).
+
+    Workflow: user sees a tag in FB notifications, copies the post permalink,
+    runs ``make reply-url URL=<permalink> MSG="..."``. We parse the permalink
+    into ``<owner>_<short>``, then POST /<id>/comments. On failure, falls
+    back to ``$FB_PAGE_ID`` as the owner (handles Meta's user-facing alias
+    that differs from the Graph-API id).
+    """
+    cfg = Config.load(ENV_PATH)
+    page_token = cfg.require("FB_PAGE_ACCESS_TOKEN")[0]
+    owner, short = parse_fb_permalink(args.url)
+    post_id = f"{owner}_{short}"
+    print(f"[..] permalink -> post id: {post_id}", file=sys.stderr)
+    try:
+        out = gpost(f"/{post_id}/comments", page_token, message=args.message)
+    except ApiError as e:
+        page_id = cfg.get("FB_PAGE_ID")
+        if page_id and page_id != owner:
+            fallback = f"{page_id}_{short}"
+            print(f"[!] {e}; retrying with FB_PAGE_ID owner: {fallback}", file=sys.stderr)
+            out = gpost(f"/{fallback}/comments", page_token, message=args.message)
+        else:
+            raise
+    pp(out)
+
+
 def cmd_delete_comment(args: argparse.Namespace) -> None:
     _todo("cmd_delete_comment")
 
@@ -507,6 +535,10 @@ def build_parser() -> argparse.ArgumentParser:
     rp = sub.add_parser("reply"); rp.set_defaults(func=cmd_reply)
     rp.add_argument("to")
     rp.add_argument("message")
+
+    ru = sub.add_parser("reply-url"); ru.set_defaults(func=cmd_reply_url)
+    ru.add_argument("url")
+    ru.add_argument("message")
 
     dc = sub.add_parser("delete-comment"); dc.set_defaults(func=cmd_delete_comment)
     dc.add_argument("id")
