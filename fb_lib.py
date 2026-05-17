@@ -352,6 +352,53 @@ def persist_page(cfg: Config, page: dict) -> None:
     })
 
 
+def configure_app_webhook(
+    cfg: "Config",
+    worker_base: str,
+    verify_token: str,
+    fields: str = "mention,feed",
+) -> dict:
+    """Register (or update) the app-level webhook subscription via API.
+
+    Bypasses the Meta App Dashboard's Webhooks product (which doesn't show
+    up in the sidebar for apps using FB Login for Business). Uses the App
+    Access Token (``<app-id>|<app-secret>``, no user OAuth needed). Meta
+    silently does the verification handshake against ``<worker>/webhook``.
+
+    Returns the API response dict (``{"success": true}`` on success).
+    """
+    app_id, app_secret = cfg.require("FB_APP_ID", "FB_APP_SECRET")
+    app_token = f"{app_id}|{app_secret}"
+    r = requests.post(
+        f"{GRAPH}/{app_id}/subscriptions",
+        data={
+            "object": "page",
+            "callback_url": f"{worker_base.rstrip('/')}/webhook",
+            "fields": fields,
+            "verify_token": verify_token,
+            "access_token": app_token,
+        },
+        timeout=60,
+    )
+    if r.status_code != 200:
+        raise _parse_error(r)
+    return r.json()
+
+
+def list_app_subscriptions(cfg: "Config") -> dict:
+    """GET /<app-id>/subscriptions to inspect current app-level subscriptions."""
+    app_id, app_secret = cfg.require("FB_APP_ID", "FB_APP_SECRET")
+    app_token = f"{app_id}|{app_secret}"
+    r = requests.get(
+        f"{GRAPH}/{app_id}/subscriptions",
+        params={"access_token": app_token},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        raise _parse_error(r)
+    return r.json()
+
+
 def fetch_mentions(worker_base: str, verify_token: str, since_ms: int = 0) -> dict:
     """Poll the Cloudflare Worker's /mentions endpoint.
 

@@ -11,7 +11,7 @@ RUN := $(shell command -v uv >/dev/null 2>&1 && echo "uv run" || echo "python3")
   reply delete-comment hide unhide \
   insights page-insights \
   pages whoami refresh auth limits \
-  mentions subscribe-page \
+  mentions subscribe-page webhook-setup \
   smoke worker-deploy worker-tail worker-delete env-check test \
   get-latest comments-latest reactions-latest delete-latest
 
@@ -64,6 +64,7 @@ help: ## show this help
 	@echo "  make env-check                                 sanity-check .env"
 	@echo ""
 	@echo "Mentions / webhook:"
+	@echo "  make webhook-setup                             register app-level subscription (one-time)"
 	@echo "  make subscribe-page                            tell Meta to push events for Dr.蜥蜴"
 	@echo "  make mentions [SINCE=<unix_ms>]                poll worker for received events"
 	@echo ""
@@ -201,6 +202,9 @@ pages: ## list pages I admin
 	$(RUN) fb.py pages
 
 # ---- Mentions / webhook ----------------------------------------------------
+
+webhook-setup: ## register app-level webhook subscription (one-time, bypasses Meta Dashboard)
+	$(RUN) fb.py webhook-setup $(if $(FIELDS),--fields "$(FIELDS)",)
 
 subscribe-page: ## tell Meta to push webhook events for the configured Page
 	$(RUN) fb.py subscribe-page $(if $(FIELDS),--fields "$(FIELDS)",)

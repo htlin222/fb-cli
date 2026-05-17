@@ -31,6 +31,7 @@ from fb_lib import (
     SCOPES,
     ValidationError,
     build_auth_url,
+    configure_app_webhook,
     exchange_code_for_short_token,
     exchange_to_long_lived,
     fetch_mentions,
@@ -39,6 +40,7 @@ from fb_lib import (
     gdelete,
     gget,
     gpost,
+    list_app_subscriptions,
     persist_page,
     persist_user_token,
     poll_worker_for_code,
@@ -186,6 +188,25 @@ def cmd_mentions(args: argparse.Namespace) -> None:
     )
     body = fetch_mentions(worker_base, verify_token, since_ms=args.since)
     pp(body)
+
+
+def cmd_webhook_setup(args: argparse.Namespace) -> None:
+    """Register/update the app-level webhook subscription via API.
+
+    Bypasses the Meta App Dashboard's Webhooks product UI -- needed because
+    apps using FB Login for Business no longer expose that UI in the sidebar.
+    Idempotent: re-running just updates the existing subscription.
+    """
+    cfg = Config.load(ENV_PATH)
+    worker_base, verify_token = cfg.require(
+        "FB_WORKER_BASE", "FB_WEBHOOK_VERIFY_TOKEN"
+    )
+    fields = args.fields or "mention,feed"
+    print(f"[..] registering {worker_base}/webhook for object=page, fields={fields}")
+    res = configure_app_webhook(cfg, worker_base, verify_token, fields=fields)
+    print(f"[ok] subscription: {res}")
+    print("\n[..] current subscriptions:")
+    pp(list_app_subscriptions(cfg))
 
 
 # ---------- Publish ----------
@@ -431,7 +452,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("limits").set_defaults(func=cmd_limits)
 
     sp = sub.add_parser("subscribe-page"); sp.set_defaults(func=cmd_subscribe_page)
-    sp.add_argument("--fields", help="comma-separated (default: mentions,feed)")
+    sp.add_argument("--fields", help="comma-separated (default: mention,feed)")
+
+    ws = sub.add_parser("webhook-setup"); ws.set_defaults(func=cmd_webhook_setup)
+    ws.add_argument("--fields", help="comma-separated (default: mention,feed)")
 
     mn = sub.add_parser("mentions"); mn.set_defaults(func=cmd_mentions)
     mn.add_argument("--since", type=int, default=0, help="unix ms; show events newer than")
