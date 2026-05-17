@@ -9,6 +9,9 @@ __pycache__/
 *.pyo
 .venv/
 .python-version
+build/
+dist/
+*.egg-info/
 
 # Cloudflare / wrangler
 cloudflare-worker/.wrangler/

@@ -49,7 +49,22 @@ from fb_lib import (
     validate_schedule_time,
 )
 
-ENV_PATH = Path(__file__).parent / ".env"
+# Resolve .env relative to the current working directory so that a
+# uvx-installed `fb-cli` binary finds the user's local .env (the package
+# dir is read-only inside ~/.cache/uv). Falls back to the script's own
+# directory when running locally via `uv run fb.py`.
+def _resolve_env_path() -> Path:
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    sibling = Path(__file__).resolve().parent / ".env"
+    if sibling.exists():
+        return sibling
+    # Neither exists yet -- prefer cwd for first-run setup.
+    return cwd_env
+
+
+ENV_PATH = _resolve_env_path()
 
 
 def pp(obj) -> None:

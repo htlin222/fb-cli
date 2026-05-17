@@ -1,12 +1,28 @@
-# fb-cli
+# fb-cli (`fb-pages-cli` on PyPI)
 
 Facebook Pages CLI via the official Graph API + a Cloudflare Worker as the
 OAuth callback relay. Sibling of [threads-cli](https://github.com/htlin222/threads-cli);
 same architecture, different Meta product.
 
-**Status:** scaffolding (phase 1 of `docs/plans/2026-05-16-fb-cli-design.md`).
-Most commands print `[TODO]` until phase 2+ ports the OAuth flow and
-per-endpoint helpers.
+## Install
+
+```bash
+# from PyPI (once published)
+uvx fb-pages-cli --help          # ad-hoc one-off
+uv tool install fb-pages-cli     # persistent global install
+
+# from git (any version)
+uvx --from git+https://github.com/htlin222/fb-cli fb-cli --help
+
+# from a built wheel
+uv build && uvx --from dist/fb_pages_cli-0.1.0-py3-none-any.whl fb-cli --help
+```
+
+The binary is named `fb-cli`; the PyPI package is `fb-pages-cli` because
+the short name was taken.
+
+`.env` is read from the current working directory, so cd into the folder
+that holds your config before running.
 
 ## What you can do (when fully implemented)
 
