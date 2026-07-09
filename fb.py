@@ -34,6 +34,7 @@ from fb_lib import (
     configure_app_webhook,
     exchange_code_for_short_token,
     exchange_to_long_lived,
+    fb_post_reel,
     fetch_mentions,
     fetch_pages,
     fmt_expiry,
@@ -290,6 +291,32 @@ def cmd_post_link(args: argparse.Namespace) -> None:
         try:
             extra = gget(f"/{post_id}", page_token, fields="permalink_url")
             print(f"\npermalink: {extra.get('permalink_url', '(unknown)')}", file=sys.stderr)
+        except ApiError:
+            pass
+
+
+def cmd_post_reel(args: argparse.Namespace) -> None:
+    """Publish a Reel via the three-phase resumable-upload flow.
+
+    ``VIDEO`` may be a local path or an http(s) URL (GitHub release asset,
+    CDN, etc.); the bytes are downloaded here and uploaded to Facebook, so
+    Meta's file_url robots.txt / redirect / signed-url limits never apply.
+    """
+    cfg = Config.load(ENV_PATH)
+    page_id, page_token = cfg.require("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")
+    print(f"[..] uploading reel from {args.video} ...", file=sys.stderr)
+    out = fb_post_reel(
+        page_id, page_token, args.video,
+        description=args.message or None,
+        poll=not args.no_wait,
+    )
+    pp(out)
+    video_id = out.get("video_id")
+    if video_id:
+        try:
+            extra = gget(f"/{video_id}", page_token, fields="permalink_url")
+            if extra.get("permalink_url"):
+                print(f"\npermalink: {extra['permalink_url']}", file=sys.stderr)
         except ApiError:
             pass
 
@@ -624,6 +651,12 @@ def build_parser() -> argparse.ArgumentParser:
     pl = sub.add_parser("post-link"); pl.set_defaults(func=cmd_post_link)
     pl.add_argument("url")
     pl.add_argument("message")
+
+    pr = sub.add_parser("post-reel"); pr.set_defaults(func=cmd_post_reel)
+    pr.add_argument("video", help="local path or http(s) URL to an .mp4")
+    pr.add_argument("message", nargs="?", default="", help="reel description/caption")
+    pr.add_argument("--no-wait", action="store_true",
+                    help="return after finish without polling processing status")
 
     sc = sub.add_parser("schedule"); sc.set_defaults(func=cmd_schedule)
     sc.add_argument("message")

@@ -5,7 +5,7 @@ SHELL := /bin/bash
 RUN := $(shell command -v uv >/dev/null 2>&1 && echo "uv run" || echo "python3")
 
 .PHONY: help \
-  post post-image post-video post-carousel post-link schedule \
+  post post-image post-video post-reel post-carousel post-link schedule \
   edit delete \
   list get comments conversation reactions latest summary \
   reply reply-url delete-comment hide unhide \
@@ -22,6 +22,7 @@ help: ## show this help
 	@echo "  make post MSG=\"...\"                           text post"
 	@echo "  make post-image URL=<img> [MSG=...]            image post"
 	@echo "  make post-video URL=<video> [MSG=...]          video post"
+	@echo "  make post-reel VIDEO=<path|url> [MSG=...]      publish a Reel"
 	@echo "  make post-carousel URLS=\"u1,u2,...\" [MSG=...]  2-10 photo carousel"
 	@echo "  make post-link URL=<url> MSG=\"...\"             link post with OG preview"
 	@echo "  make schedule MSG=\"...\" WHEN=\"+2h\"             scheduled post (10min-6mo)"
@@ -90,6 +91,10 @@ post-image: ## image post; usage: make post-image URL=<img> [MSG=...]
 post-video: ## video post; usage: make post-video URL=<video> [MSG=...]
 	@test -n "$(URL)" || (echo "usage: make post-video URL=<video-url> [MSG=...]"; exit 2)
 	$(RUN) fb.py post "$(MSG)" --video-url "$(URL)"
+
+post-reel: ## publish a Reel; usage: make post-reel VIDEO=<path|url> [MSG=...] [NO_WAIT=1]
+	@test -n "$(VIDEO)" || (echo "usage: make post-reel VIDEO=<path-or-url> [MSG=...]"; exit 2)
+	$(RUN) fb.py post-reel "$(VIDEO)" "$(MSG)" $(if $(NO_WAIT),--no-wait,)
 
 post-carousel: ## carousel post; usage: make post-carousel URLS="u1,u2" [MSG=...]
 	@test -n "$(URLS)" || (echo "usage: make post-carousel URLS=\"u1,u2,...\" [MSG=...]"; exit 2)

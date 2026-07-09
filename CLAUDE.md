@@ -16,6 +16,7 @@ same pattern, different Meta product. **Currently in phase 1 scaffolding**
 | "post link <url> X"                                             | `make post-link URL=<url> MSG="X"`                     |
 | "post image <url>"                                              | `make post-image URL=<url> [MSG="..."]`                |
 | "post video <url>"                                              | `make post-video URL=<url> [MSG="..."]`                |
+| "post reel <path/url>" / "發 reels"                             | `make post-reel VIDEO=<path-or-url> [MSG="..."]`       |
 | "carousel" + URLs                                               | `make post-carousel URLS="u1,u2,..." [MSG=...]`        |
 | "schedule X in 2h / on date"                                    | `make schedule MSG="X" WHEN="+2h"` or `WHEN="YYYY-MM-DD HH:MM"` |
 | "edit <post-id> X"                                              | `make edit ID=<post-id> MSG="X"`                       |

@@ -25,6 +25,8 @@ import requests
 GRAPH_API_VERSION = "v21.0"
 GRAPH = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 AUTH_URL = f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth"
+# Reels use a separate resumable-upload host (not graph.facebook.com).
+RUPLOAD = f"https://rupload.facebook.com/video-upload/{GRAPH_API_VERSION}"
 
 SCOPES: tuple[str, ...] = (
     "public_profile",
@@ -186,6 +188,168 @@ def gdelete(path: str, token: str, *, timeout: int = 30) -> dict:
     if r.status_code != 200:
         raise _parse_error(r)
     return r.json()
+
+
+# ---------- Reels (resumable upload) ----------
+#
+# Reels publishing is a three-phase flow (see Meta's video-api reels guide):
+#   1. start   POST graph.facebook.com/<page>/video_reels  -> video_id
+#   2. upload  POST rupload.facebook.com/.../<video_id>     (bytes or file_url)
+#   3. finish  POST graph.facebook.com/<page>/video_reels   (video_state=PUBLISHED)
+# followed by a status poll on GET graph.facebook.com/<video_id>?fields=status.
+
+
+def reel_start(page_id: str, token: str, *, timeout: int = 30) -> str:
+    """Phase 1: open an upload session and return its ``video_id``."""
+    out = gpost(f"/{page_id}/video_reels", token, timeout=timeout, upload_phase="start")
+    vid = out.get("video_id")
+    if not vid:
+        raise ApiError(
+            status=502, code=None, subcode=None,
+            message=f"video_reels start returned no video_id: {out}", raw=out,
+        )
+    return str(vid)
+
+
+def reel_upload(
+    video_id: str,
+    token: str,
+    *,
+    data: bytes | None = None,
+    file_url: str | None = None,
+    timeout: int = 300,
+) -> dict:
+    """Phase 2: upload the video, either as raw ``data`` bytes or by handing
+    Facebook a hosted ``file_url`` for it to fetch. Exactly one is required.
+    """
+    if (data is None) == (file_url is None):
+        raise ValidationError(
+            "reel_upload needs exactly one of data= or file_url="
+        )
+    url = f"{RUPLOAD}/{video_id}"
+    headers = {"Authorization": f"OAuth {token}"}
+    if file_url is not None:
+        headers["file_url"] = file_url
+        r = requests.post(url, headers=headers, timeout=timeout)
+    else:
+        headers["offset"] = "0"
+        headers["file_size"] = str(len(data))
+        r = requests.post(url, headers=headers, data=data, timeout=timeout)
+    if r.status_code != 200:
+        raise _parse_error(r)
+    return r.json()
+
+
+def reel_finish(
+    page_id: str,
+    token: str,
+    video_id: str,
+    *,
+    description: str | None = None,
+    video_state: str = "PUBLISHED",
+    timeout: int = 30,
+) -> dict:
+    """Phase 3: publish (or draft/schedule) the uploaded reel."""
+    params: dict[str, str] = {
+        "upload_phase": "finish",
+        "video_id": video_id,
+        "video_state": video_state,
+    }
+    if description:
+        params["description"] = description
+    return gpost(f"/{page_id}/video_reels", token, timeout=timeout, **params)
+
+
+def reel_status(video_id: str, token: str, *, timeout: int = 30) -> dict:
+    """Read the reel's processing/publishing status."""
+    return gget(f"/{video_id}", token, timeout=timeout, fields="status")
+
+
+def resolve_video_bytes(
+    video: str, *, get=requests.get, timeout: int = 300
+) -> bytes:
+    """Return raw video bytes from a local path or an ``http(s)`` URL.
+
+    A URL is downloaded here (rather than handed to Facebook as ``file_url``)
+    so the byte-upload path works uniformly for local files, CDN links, and
+    redirecting hosts like GitHub release assets.
+    """
+    if re.match(r"^https?://", video, re.IGNORECASE):
+        r = get(video, timeout=timeout)
+        if r.status_code != 200:
+            raise ApiError(
+                status=r.status_code, code=None, subcode=None,
+                message=f"could not download video from {video}", raw=None,
+            )
+        return r.content
+    p = Path(video).expanduser()
+    if not p.is_file():
+        raise ValidationError(f"video not found: {video}")
+    return p.read_bytes()
+
+
+def poll_reel_status(
+    video_id: str,
+    token: str,
+    *,
+    interval: float = 3.0,
+    timeout: float = 300.0,
+    now=time.monotonic,
+    sleep=time.sleep,
+) -> dict:
+    """Poll ``reel_status`` until processing completes, errors, or times out.
+
+    ``now`` and ``sleep`` are injectable for tests.
+    """
+    deadline = now() + timeout
+    while now() < deadline:
+        st = reel_status(video_id, token)
+        phases = st.get("status", {}) if isinstance(st, dict) else {}
+        proc = phases.get("processing_phase", {}).get("status")
+        vstatus = phases.get("video_status")
+        if proc in ("complete", "completed") or vstatus == "ready":
+            return st
+        if proc == "error" or vstatus == "error":
+            raise ApiError(
+                status=502, code=None, subcode=None,
+                message=f"reel processing failed: {phases}", raw=st,
+            )
+        sleep(interval)
+    raise ApiError(
+        status=408, code=None, subcode=None,
+        message=f"timed out waiting for reel {video_id} to process after {timeout:.0f}s",
+    )
+
+
+def fb_post_reel(
+    page_id: str,
+    token: str,
+    video: str,
+    *,
+    description: str | None = None,
+    poll: bool = True,
+    poll_interval: float = 3.0,
+    poll_timeout: float = 300.0,
+    now=time.monotonic,
+    sleep=time.sleep,
+) -> dict:
+    """Publish a Reel end-to-end: resolve bytes -> start -> upload -> finish
+    -> (optionally) poll until processing completes.
+
+    ``video`` is a local path or an ``http(s)`` URL. Returns
+    ``{"video_id": ..., "status": <last status dict or None>}``.
+    """
+    data = resolve_video_bytes(video)
+    video_id = reel_start(page_id, token)
+    reel_upload(video_id, token, data=data)
+    reel_finish(page_id, token, video_id, description=description)
+    status = None
+    if poll:
+        status = poll_reel_status(
+            video_id, token,
+            interval=poll_interval, timeout=poll_timeout, now=now, sleep=sleep,
+        )
+    return {"video_id": video_id, "status": status}
 
 
 # ---------- OAuth (skeleton) ----------
