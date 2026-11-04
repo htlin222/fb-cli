@@ -3,6 +3,8 @@ SHELL := /bin/bash
 
 # Prefer uv (pulls deps from PEP-723 header on first run); fall back to python3.
 RUN := $(shell command -v uv >/dev/null 2>&1 && echo "uv run" || echo "python3")
+# .env holds 1Password refs (op://...); `op run` injects the real values (FB_* env wins over .env).
+RUN := op run --env-file=$(CURDIR)/.env -- $(RUN)
 
 .PHONY: help \
   post post-image post-video post-reel post-carousel post-link schedule \

@@ -10,8 +10,10 @@ plan in ``docs/plans/2026-05-16-fb-cli-design.md``.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -108,6 +110,42 @@ def _parse_error(r: requests.Response) -> ApiError:
 # ---------- Config ----------
 
 
+def _op_write(ref: str, value: str) -> None:
+    """Write `value` into the 1Password field named by `op://vault/item/[section/]field`.
+
+    The secret goes to `op item edit` as a JSON item on stdin, never in argv.
+    """
+    parts = ref[len("op://"):].split("/")
+    if len(parts) not in (3, 4):
+        raise ValidationError(f"unsupported 1Password reference: {ref}")
+    vault, item = parts[0], parts[1]
+    section, fld = (parts[2], parts[3]) if len(parts) == 4 else (None, parts[2])
+    got = subprocess.run(
+        ["op", "item", "get", item, "--vault", vault, "--format", "json"],
+        capture_output=True, text=True, timeout=120,
+    )
+    if got.returncode != 0:
+        raise ValidationError(f"op item get failed for {ref}: {got.stderr.strip()}")
+    data = json.loads(got.stdout)
+
+    def match(f: dict) -> bool:
+        if fld not in (f.get("label"), f.get("id")):
+            return False
+        sec = f.get("section") or {}
+        return section is None or section in (sec.get("label"), sec.get("id"))
+
+    hits = [f for f in data.get("fields", []) if match(f)]
+    if len(hits) != 1:
+        raise ValidationError(f"{ref}: expected exactly one field, found {len(hits)}")
+    hits[0]["value"] = value
+    r = subprocess.run(
+        ["op", "item", "edit", item, "--vault", vault],
+        input=json.dumps(data), capture_output=True, text=True, timeout=120,
+    )
+    if r.returncode != 0:
+        raise ValidationError(f"op item edit failed for {ref}: {r.stderr.strip()}")
+
+
 @dataclass
 class Config:
     """Read/write/merge .env. Falls back to env vars prefixed FB_."""
@@ -139,7 +177,13 @@ class Config:
         for line in existing:
             stripped = line.strip()
             if stripped and not stripped.startswith("#") and "=" in stripped:
-                k = stripped.split("=", 1)[0].strip()
+                k, cur = (x.strip() for x in stripped.split("=", 1))
+                if k in updates and cur.strip('"').strip("'").startswith("op://"):
+                    # Secret lives in 1Password: update it there, keep the ref line.
+                    _op_write(cur.strip('"').strip("'"), updates[k])
+                    seen.add(k)
+                    out.append(line)
+                    continue
                 if k in updates:
                     out.append(f"{k}={updates[k]}")
                     seen.add(k)
